@@ -20,6 +20,7 @@ from app.models.llm import LocalLLM
 from app.models.speech_to_text import SpeechToText
 from app.models.text_to_speech import TextToSpeech
 from app.models.wake_word import WakeWordDetector
+from app.routers import home_assistant
 
 from config.settings import API, DEBUG
 
@@ -49,6 +50,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(home_assistant.router)
 
 # Create voice pipeline
 voice_pipeline = AsyncVoicePipeline()
@@ -222,8 +226,19 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.on_event("shutdown")
 async def shutdown_event():
     """Shutdown handler to clean up resources."""
+    # Stop voice pipeline
     if voice_pipeline.is_active:
         await voice_pipeline.stop()
+
+    # Stop Home Assistant integration
+    try:
+        from app.routers.home_assistant import get_hass_manager
+        manager = get_hass_manager()
+        if manager and manager.is_initialized:
+            await manager.shutdown()
+    except Exception as e:
+        logger.error(f"Error shutting down Home Assistant integration: {str(e)}")
+
     logger.info("Application shutting down")
 
 # Direct execution entry point
@@ -233,6 +248,13 @@ async def run_app():
     def signal_handler(sig, frame):
         logger.info(f"Received signal {sig}, shutting down...")
         asyncio.create_task(voice_pipeline.stop())
+
+        # Shutdown Home Assistant integration
+        from app.routers.home_assistant import get_hass_manager
+        hass_manager = get_hass_manager()
+        if hass_manager and hass_manager.is_initialized:
+            asyncio.create_task(hass_manager.shutdown())
+
         # Give time for cleanup
         asyncio.get_event_loop().call_later(1, asyncio.get_event_loop().stop)
 
@@ -241,6 +263,14 @@ async def run_app():
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
+        # Initialize Home Assistant integration
+        from app.routers.home_assistant import get_hass_manager
+        hass_manager = get_hass_manager()
+        logger.info("Initializing Home Assistant integration...")
+        await hass_manager.initialize()
+        await hass_manager.start()
+
+        # Start voice assistant
         logger.info("Starting voice assistant...")
         await voice_pipeline.start()
 
@@ -248,9 +278,24 @@ async def run_app():
         logger.info("Keyboard interrupt received, shutting down...")
         await voice_pipeline.stop()
 
+        # Shutdown Home Assistant integration
+        from app.routers.home_assistant import get_hass_manager
+        hass_manager = get_hass_manager()
+        if hass_manager and hass_manager.is_initialized:
+            await hass_manager.shutdown()
+
     except Exception as e:
         logger.error(f"Error in voice assistant: {str(e)}")
         await voice_pipeline.stop()
+
+        # Shutdown Home Assistant integration
+        try:
+            from app.routers.home_assistant import get_hass_manager
+            hass_manager = get_hass_manager()
+            if hass_manager and hass_manager.is_initialized:
+                await hass_manager.shutdown()
+        except Exception as shutdown_error:
+            logger.error(f"Error shutting down Home Assistant integration: {str(shutdown_error)}")
 
 # Main entry point
 if __name__ == "__main__":
