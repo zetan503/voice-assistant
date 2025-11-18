@@ -25,13 +25,16 @@ MODELS = {
         "model_id": os.getenv("STT_MODEL_ID", "openai/whisper-medium"),
         "device": os.getenv("STT_DEVICE", "cuda"),
         "compute_type": os.getenv("STT_COMPUTE_TYPE", "float16"),
+        "languages": os.getenv("STT_LANGUAGES", "en,es,fr,de,ja,ru,zh").split(","),
+        "default_language": os.getenv("STT_DEFAULT_LANGUAGE", "en"),
+        "translate_to_english": os.getenv("STT_TRANSLATE_TO_ENGLISH", "True").lower() in ("true", "1", "t"),
     },
     "tts": {
         "model_id": os.getenv("TTS_MODEL_ID", "tts_models/en/ljspeech/tacotron2-DDC"),
         "device": os.getenv("TTS_DEVICE", "cuda"),
     },
     "wakeword": {
-        "model_id": os.getenv("WAKEWORD_MODEL_ID", "hey_jarvis"),
+        "model_id": os.getenv("WAKEWORD_MODEL_ID", "computer"),
         "threshold": float(os.getenv("WAKEWORD_THRESHOLD", 0.5)),
     },
 }

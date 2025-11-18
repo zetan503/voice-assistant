@@ -12,6 +12,7 @@ from app.models.speech_to_text import SpeechToText
 from app.models.text_to_speech import TextToSpeech
 from app.models.wake_word import WakeWordDetector
 from app.utils.audio import AudioIO
+from app.utils.sound_effects import StarTrekSounds
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,9 @@ class AsyncVoicePipeline:
         self.stt = SpeechToText()
         self.llm = LocalLLM()
         self.tts = TextToSpeech()
+
+        # Star Trek sound effects
+        self.sound_effects = StarTrekSounds(sample_rate=self.audio.sample_rate)
 
         # State management
         self.is_listening = False
@@ -52,6 +56,9 @@ class AsyncVoicePipeline:
         self.on_transcription = None
         self.on_response = None
         self.on_error = None
+
+        # Sound effect settings
+        self.use_sound_effects = True
 
     async def start(self):
         """Start the voice assistant pipeline."""
@@ -83,6 +90,11 @@ class AsyncVoicePipeline:
             if self.wake_word.detect(chunk):
                 logger.info("Wake word detected!")
                 self.wake_word_detected.set()
+
+                # Play acknowledgment sound
+                if self.use_sound_effects:
+                    acknowledgment_sound = self.sound_effects.generate_acknowledgment()
+                    await self.sound_effects.play(acknowledgment_sound)
 
                 if self.on_wake_word:
                     await self.on_wake_word()
@@ -213,32 +225,89 @@ class AsyncVoicePipeline:
 
     async def generate_response(self, text: str) -> str:
         """
-        Generate a response using the LLM.
+        Generate a response using the LLM in Enterprise computer style.
+        Processes user input for Star Trek-themed interactions.
 
         Args:
             text: User's transcribed speech
 
         Returns:
-            Generated text response
+            Generated text response in Enterprise computer style
         """
-        logger.info("Generating response...")
+        logger.info("Generating response in Enterprise computer style...")
 
         try:
-            # Simple prompt template
-            prompt = f"User: {text}\nAssistant: "
+            # Play computer processing sound
+            if self.use_sound_effects:
+                working_sound = self.sound_effects.generate_working()
+                await self.sound_effects.play(working_sound)
+                logger.info("Played computer processing sound effect")
 
-            # Generate response
-            response = self.llm.generate(prompt)
+            # Parse the user command to add Star Trek context if needed
+            processed_text = self._process_user_command(text)
+
+            # Generate response using the enhanced LLM
+            response = self.llm.generate(processed_text)
+
+            # Log the styled response
+            logger.info(f"Enterprise computer response: {response}")
+
+            # Play completion sound after generating response
+            if self.use_sound_effects:
+                completion_sound = self.sound_effects.generate_completion()
+                await self.sound_effects.play(completion_sound)
+                logger.info("Played completion sound effect")
 
             return response
 
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}")
-            return "I'm sorry, I couldn't process that request."
+
+            # Play error sound
+            if self.use_sound_effects:
+                error_sound = self.sound_effects.generate_error()
+                await self.sound_effects.play(error_sound)
+                logger.info("Played error sound effect")
+
+            return "Unable to comply. System malfunction detected."
+
+    def _process_user_command(self, text: str) -> str:
+        """
+        Process user command to enhance Star Trek interaction experience.
+        Adds context or reformats questions to improve computer responses.
+
+        Args:
+            text: Original user speech text
+
+        Returns:
+            Processed command optimized for Enterprise computer responses
+        """
+        # Convert text to lowercase for easier pattern matching
+        text_lower = text.lower()
+
+        # Handle specific Star Trek command patterns
+        if "status report" in text_lower:
+            return "Provide a brief status report on all major ship systems"
+        elif "set course" in text_lower or "plot course" in text_lower:
+            return f"I need navigational assistance: {text}"
+        elif "shields" in text_lower and ("up" in text_lower or "raise" in text_lower):
+            return "Activate defensive systems and shield protocols"
+        elif "red alert" in text_lower:
+            return "Initiate red alert protocols and prepare ship systems for potential combat"
+        elif "tea" in text_lower and "earl grey" in text_lower and "hot" in text_lower:
+            return "Captain Picard's favorite tea order detected. Respond with a reference to the replicator"
+
+        # Add context to general knowledge questions
+        if text_lower.startswith("what is") or text_lower.startswith("who is") or text_lower.startswith("where is"):
+            return f"As the Enterprise computer, answer this query: {text}"
+
+        # For general commands, just pass through
+        return text
 
     async def speak_response(self, text: str) -> None:
         """
-        Convert text to speech and play it.
+        Convert text to speech and play it with interruption capability.
+        Monitors for wake word while speaking to enable mid-response interruptions.
 
         Args:
             text: Text to speak
@@ -249,15 +318,59 @@ class AsyncVoicePipeline:
             # Set speaking state
             self.is_speaking = True
 
+            # Set up a task to monitor for interruptions
+            interruption_detected = asyncio.Event()
+
+            # Create a background task to monitor for wake word while speaking
+            async def monitor_for_interruption():
+                logger.debug("Starting interruption monitor")
+                async for chunk in self.audio.record_stream():
+                    # Check if wake word is detected during response
+                    if self.wake_word.detect(chunk):
+                        logger.info("Voice command interruption detected!")
+                        interruption_detected.set()
+                        break
+
+                    # Stop monitoring if we're no longer speaking
+                    if not self.is_speaking:
+                        break
+
+                    # Allow for cooperative multitasking
+                    await asyncio.sleep(0.01)
+
+                logger.debug("Interruption monitor stopped")
+
+            # Start the interruption monitor
+            interruption_monitor = asyncio.create_task(monitor_for_interruption())
+
             # Synthesize speech
             async for audio_chunk in self.tts.synthesize_stream(text):
+                # Check for interruption before playing each chunk
+                if interruption_detected.is_set():
+                    logger.info("Response interrupted. Stopping speech output.")
+                    break
+
                 # Play the chunk
                 await self.audio.play(audio_chunk)
 
                 # Allow for cooperative multitasking
                 await asyncio.sleep(0.01)
 
+            # Clean up
             self.is_speaking = False
+
+            # Cancel the interruption monitor if it's still running
+            if not interruption_monitor.done():
+                interruption_monitor.cancel()
+
+            # If interrupted, immediately set the wake word detected event to trigger a new conversation
+            if interruption_detected.is_set():
+                self.wake_word_detected.set()
+                # Play interruption acknowledgment sound
+                if self.use_sound_effects:
+                    interruption_sound = self.sound_effects.generate_interruption()
+                    await self.sound_effects.play(interruption_sound)
+                logger.info("Played interruption acknowledgment sound")
 
         except Exception as e:
             logger.error(f"Error speaking response: {str(e)}")

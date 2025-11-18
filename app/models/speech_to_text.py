@@ -60,28 +60,76 @@ class SpeechToText:
 
     def transcribe(self, audio_data: Union[np.ndarray, str]) -> str:
         """
-        Transcribe audio data to text.
+        Transcribe audio data to text with multi-language support.
+        Uses Whisper's built-in language detection and supports translation to English.
 
         Args:
             audio_data: NumPy array of audio samples or path to audio file
 
         Returns:
-            Transcribed text
+            Transcribed text (potentially translated from the original language)
         """
         if self.model is None:
             raise RuntimeError("Model not loaded. Call load_model first.")
 
         try:
-            segments, info = self.model.transcribe(
+            # Get supported languages from config
+            supported_languages = self.config.get("languages", ["en"])
+            translate_to_english = self.config.get("translate_to_english", True)
+
+            # First, detect the language - this is a capability of Whisper models
+            initial_segments, info = self.model.transcribe(
                 audio_data,
                 beam_size=5,
-                language="en",
+                language=None,  # Auto-detect language
+                task="transcribe",
                 vad_filter=True,
                 vad_parameters=dict(min_silence_duration_ms=500)
             )
 
+            detected_language = info.language
+            logger.info(f"Detected language: {detected_language}")
+
+            # If detected language is in our supported list or if we're translating to English
+            if detected_language in supported_languages:
+                # Transcribe again with the detected language for better accuracy
+                segments, _ = self.model.transcribe(
+                    audio_data,
+                    beam_size=5,
+                    language=detected_language,
+                    task="transcribe",
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=500)
+                )
+
+                # Check if we should translate non-English input to English
+                if detected_language != "en" and translate_to_english:
+                    logger.info(f"Translating from {detected_language} to English")
+                    segments, _ = self.model.transcribe(
+                        audio_data,
+                        beam_size=5,
+                        language=detected_language,
+                        task="translate",
+                        vad_filter=True,
+                        vad_parameters=dict(min_silence_duration_ms=500)
+                    )
+            else:
+                # Language not supported in our list, use English or default language
+                default_language = self.config.get("default_language", "en")
+                logger.info(f"Language {detected_language} not in supported list. Using {default_language}")
+                segments, _ = self.model.transcribe(
+                    audio_data,
+                    beam_size=5,
+                    language=default_language,
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=500)
+                )
+
             # Combine all segment text
             result = " ".join(segment.text for segment in segments)
+
+            # Log the detected language and transcript
+            logger.info(f"Transcription language: {detected_language}, Text: {result.strip()}")
 
             return result.strip()
 
@@ -94,7 +142,8 @@ class SpeechToText:
         audio_stream: Generator[np.ndarray, None, None]
     ) -> Generator[str, None, None]:
         """
-        Transcribe streaming audio data asynchronously.
+        Transcribe streaming audio data asynchronously with multi-language support.
+        Detects language from audio stream and handles multiple languages.
 
         Args:
             audio_stream: Generator yielding audio chunks
@@ -109,6 +158,15 @@ class SpeechToText:
             # Buffer for accumulating audio
             audio_buffer = np.array([], dtype=np.float32)
 
+            # Get supported languages from config
+            supported_languages = self.config.get("languages", ["en"])
+            translate_to_english = self.config.get("translate_to_english", True)
+            default_language = self.config.get("default_language", "en")
+
+            # We'll need to detect the language from the initial audio
+            detected_language = None
+            language_detection_done = False
+
             # Process each chunk from the stream
             async for chunk in audio_stream:
                 # Add chunk to buffer
@@ -116,11 +174,39 @@ class SpeechToText:
 
                 # Only process if we have enough audio (0.5 seconds)
                 if len(audio_buffer) >= int(self.sample_rate * 0.5):
+                    # First detect language if not already done
+                    if not language_detection_done and len(audio_buffer) >= int(self.sample_rate * 2):
+                        try:
+                            # Need a longer sample for reliable language detection
+                            _, info = self.model.transcribe(
+                                audio_buffer,
+                                beam_size=5,
+                                language=None,  # Auto-detect
+                                task="transcribe",
+                                vad_filter=True
+                            )
+                            detected_language = info.language
+                            logger.info(f"Stream detected language: {detected_language}")
+                            language_detection_done = True
+                        except Exception as e:
+                            logger.warning(f"Error detecting language: {str(e)}, using default: {default_language}")
+                            detected_language = default_language
+                            language_detection_done = True
+
+                    # If language is detected or we're using default
+                    task = "transcribe"
+                    language = detected_language if language_detection_done else default_language
+
+                    # If translating non-English to English
+                    if language_detection_done and detected_language != "en" and translate_to_english:
+                        task = "translate"
+
                     # Transcribe the buffered audio
                     segments, _ = self.model.transcribe(
                         audio_buffer,
                         beam_size=5,
-                        language="en",
+                        language=language,
+                        task=task,
                         vad_filter=True
                     )
 
@@ -133,10 +219,18 @@ class SpeechToText:
 
             # Process any remaining audio in the buffer
             if len(audio_buffer) > 0:
+                task = "transcribe"
+                language = detected_language if language_detection_done else default_language
+
+                # If translating non-English to English
+                if language_detection_done and detected_language != "en" and translate_to_english:
+                    task = "translate"
+
                 segments, _ = self.model.transcribe(
                     audio_buffer,
                     beam_size=5,
-                    language="en",
+                    language=language,
+                    task=task,
                     vad_filter=True
                 )
 
