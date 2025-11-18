@@ -55,3 +55,38 @@ API = {
 
 # Debug mode
 DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "t")
+
+# Home Assistant configuration
+HOME_ASSISTANT = {
+    "url": os.getenv("HASS_URL", "http://localhost:8123"),
+    "token": os.getenv("HASS_TOKEN", ""),
+    "verify_ssl": os.getenv("HASS_VERIFY_SSL", "True").lower() in ("true", "1", "t"),
+}
+
+# YoLink configuration
+YOLINK = {
+    "client_id": os.getenv("YOLINK_CLIENT_ID", ""),
+    "client_secret": os.getenv("YOLINK_CLIENT_SECRET", ""),
+    "redirect_uri": os.getenv("YOLINK_REDIRECT_URI", "http://localhost/callback"),
+    "user_access_token": os.getenv("YOLINK_USER_ACCESS_TOKEN", ""),
+    "device_list": os.getenv("YOLINK_DEVICE_LIST", "").split(","),
+}
+
+# Camera configuration
+CAMERA = {
+    "stream_url": os.getenv("CAMERA_STREAM_URL", ""),
+    "snapshot_url": os.getenv("CAMERA_SNAPSHOT_URL", ""),
+    "username": os.getenv("CAMERA_USERNAME", ""),
+    "password": os.getenv("CAMERA_PASSWORD", ""),
+    "known_faces_dir": os.getenv("KNOWN_FACES_DIR", str(BASE_DIR / "data" / "known_faces")),
+    "detection_interval": int(os.getenv("DETECTION_INTERVAL", 5)),  # seconds
+    "confidence_threshold": float(os.getenv("FACE_CONFIDENCE_THRESHOLD", 0.6)),
+}
+
+# Security configuration
+SECURITY = {
+    "perimeter_sensors": os.getenv("SECURITY_PERIMETER_SENSORS", "").split(","),
+    "notification_email": os.getenv("SECURITY_NOTIFICATION_EMAIL", ""),
+    "alert_cooldown": int(os.getenv("SECURITY_ALERT_COOLDOWN", 300)),  # seconds
+    "monitoring_interval": int(os.getenv("SECURITY_MONITORING_INTERVAL", 1)),  # seconds
+}

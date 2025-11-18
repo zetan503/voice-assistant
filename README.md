@@ -10,6 +10,11 @@ A voice assistant application that uses local LLM (Llama/Mixtral) and Whisper mo
 - Wake word detection mechanism
 - Concurrent speech input/output handling
 - FastAPI web interface
+- Home Assistant integration with real-time security monitoring
+- YoLink motion sensor integration for alerts
+- Camera integration with facial recognition
+- Automated announcements for security events and visitors
+- Real-time perimeter security monitoring
 
 ## Requirements
 
